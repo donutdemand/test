@@ -13,6 +13,14 @@ const logger = require('./logger');
 
 const FIRST_POLL_DELAY_MS = 15000;
 const POLL_EVERY_MS = 5000;
+// Per CaptchaAI docs, server-side submit errors are transient:
+// retry after ~10s with exponential backoff.
+const SUBMIT_RETRY_DELAYS_MS = [10000, 20000, 40000];
+const TRANSIENT_SUBMIT_ERRORS = new Set([
+  'ERROR_SERVER_ERROR',
+  'ERROR_INTERNAL_SERVER_ERROR',
+  'ERROR_NO_SLOT_AVAILABLE',
+]);
 
 function solverBaseUrl() {
   return (
@@ -41,23 +49,47 @@ function parseReply(text, status) {
   }
 }
 
-async function submitHcaptcha({ apiKey, sitekey, pageUrl }) {
+async function submitHcaptcha({ apiKey, sitekey, pageUrl, rqdata, username }) {
+  // Discord serves hCaptcha Enterprise: captcha_rqdata must be forwarded as
+  // the `data` param or the solve will not validate. Challenges are invisible.
+  const params = {
+    key: apiKey,
+    method: 'hcaptcha',
+    sitekey,
+    pageurl: pageUrl,
+    invisible: '1',
+    ...(rqdata ? { data: rqdata } : {}),
+    json: '1',
+  };
   const url = `${solverBaseUrl()}/in.php`;
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ key: apiKey, method: 'hcaptcha', sitekey, pageurl: pageUrl, json: '1' }),
-    });
-  } catch (err) {
-    throw networkError(url, err);
-  }
-  const data = parseReply(await res.text().catch(() => ''), res.status);
-  if (data.status !== 1) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params),
+      });
+    } catch (err) {
+      throw networkError(url, err);
+    }
+    if (!res.ok && [429, 500, 502, 503].includes(res.status) && attempt < SUBMIT_RETRY_DELAYS_MS.length) {
+      const wait = SUBMIT_RETRY_DELAYS_MS[attempt];
+      logger.warn('captcha', `Solver HTTP ${res.status} — retrying submit in ${wait / 1000}s…`);
+      await sleep(wait);
+      continue;
+    }
+    const data = parseReply(await res.text().catch(() => ''), res.status);
+    if (data.status === 1) return String(data.request);
+    if (TRANSIENT_SUBMIT_ERRORS.has(String(data.request)) && attempt < SUBMIT_RETRY_DELAYS_MS.length) {
+      const wait = SUBMIT_RETRY_DELAYS_MS[attempt];
+      logger.warn('captcha', `Solver busy (${data.request})${username ? ` for ${username}` : ''} — retrying submit in ${wait / 1000}s (attempt ${attempt + 2})…`);
+      await sleep(wait);
+      continue;
+    }
     throw new Error(`Solver rejected the task: ${describeError(data.request)}`);
   }
-  return String(data.request);
 }
 
 function describeError(code) {
@@ -111,7 +143,7 @@ async function pollSolution({ apiKey, taskId, timeoutMs = 120000, username }) {
  * Solve a Discord captcha challenge. Returns the solution token string.
  * Every step is logged so the dashboard shows progress.
  */
-async function solveDiscordCaptcha({ settings, sitekey, service, pageUrl, username }) {
+async function solveDiscordCaptcha({ settings, sitekey, service, pageUrl, rqdata, username }) {
   const who = username ? ` for ${username}` : '';
   if (!hasKey(settings)) {
     throw new Error('Captcha required but no CaptchaAI key is saved in Settings.');
@@ -122,11 +154,14 @@ async function solveDiscordCaptcha({ settings, sitekey, service, pageUrl, userna
   if (service && String(service).toLowerCase() !== 'hcaptcha') {
     throw new Error(`Unsupported captcha service "${service}" — only hCaptcha is handled.`);
   }
-  logger.info('captcha', `Submitting hCaptcha challenge${who} to CaptchaAI…`);
+  const target = pageUrl || 'https://discord.com/channels/@me';
+  logger.info('captcha', `Submitting hCaptcha challenge${who} to CaptchaAI… (sitekey ${String(sitekey).slice(0, 8)}…, page ${target}${rqdata ? ', enterprise rqdata attached' : ''})`);
   const taskId = await submitHcaptcha({
     apiKey: settings.captchaApiKey,
     sitekey,
-    pageUrl: pageUrl || 'https://discord.com',
+    pageUrl: target,
+    rqdata,
+    username,
   });
   logger.info('captcha', `Solver accepted task ${taskId}${who}, waiting for solution…`);
   const token = await pollSolution({ apiKey: settings.captchaApiKey, taskId, username });

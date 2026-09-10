@@ -112,17 +112,22 @@ function parseInvite(input) {
 /**
  * Join a server with one stored token. If Discord answers with a captcha
  * challenge and `solveCaptcha` is provided, it is called with the challenge
- * and the join is retried once with the solution.
+ * and the join is retried once with the solution in the X-Captcha-* headers
+ * (the JSON `captcha_key` body field is deprecated and rejected).
  */
 async function joinInvite(stored, code, solveCaptcha) {
-  const attempt = async (captchaKey) => {
+  const attempt = async (captcha) => {
+    const headers = {
+      Authorization: authHeader(stored),
+      'Content-Type': 'application/json',
+    };
+    if (captcha?.key) headers['X-Captcha-Key'] = captcha.key;
+    if (captcha?.rqtoken) headers['X-Captcha-Rqtoken'] = captcha.rqtoken;
+    if (captcha?.sessionId) headers['X-Captcha-Session-Id'] = captcha.sessionId;
     const res = await fetch(`${API_BASE}/invites/${code}`, {
       method: 'POST',
-      headers: {
-        Authorization: authHeader(stored),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(captchaKey ? { captcha_key: captchaKey } : {}),
+      headers,
+      body: JSON.stringify({}),
     });
     if (res.status === 429) {
       const data = await res.json().catch(() => ({}));
@@ -138,7 +143,9 @@ async function joinInvite(stored, code, solveCaptcha) {
         err.captcha = {
           sitekey: data.captcha_sitekey,
           service: data.captcha_service || 'hcaptcha',
-          rqdata: data.captcha_rqdata || data.rqdata || null,
+          rqdata: data.captcha_rqdata || null,
+          rqtoken: data.captcha_rqtoken || null,
+          sessionId: data.captcha_session_id || null,
         };
         throw err;
       }
@@ -156,7 +163,11 @@ async function joinInvite(stored, code, solveCaptcha) {
   } catch (err) {
     if (err.message === 'captcha_required' && solveCaptcha) {
       const key = await solveCaptcha(err.captcha);
-      return await attempt(key);
+      return await attempt({
+        key,
+        rqtoken: err.captcha.rqtoken,
+        sessionId: err.captcha.sessionId,
+      });
     }
     throw err;
   }
