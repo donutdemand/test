@@ -126,6 +126,10 @@ select option { background: #151a2e; }
 .log-error { color: var(--red); }
 .log-ts { color: #5f6890; margin-right: 8px; }
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20px 30px; }
+.log-tools { display: flex; gap: 8px; align-items: center; }
+.log-tools select { width: auto; padding: 7px 10px; font-size: 12px; }
+.progress { height: 8px; border-radius: 99px; background: rgba(255,255,255,0.08); margin-top: 10px; overflow: hidden; }
+.progress .bar { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.4s ease; }
 #toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
   background: #1a2040; border: 1px solid var(--border); color: var(--text);

@@ -1,6 +1,7 @@
 const path = require('path');
 const express = require('express');
-const { validateToken, sendChannelMessage, isSnowflake } = require('./discord');
+const { validateToken, sendChannelMessage, isSnowflake, parseInvite, joinInvite } = require('./discord');
+const { solveDiscordCaptcha } = require('./captcha');
 const store = require('./store');
 const logger = require('./logger');
 const Scheduler = require('./scheduler');
@@ -10,8 +11,35 @@ function createApp() {
   app.use(express.json({ limit: '256kb' }));
 
   let state = store.load();
+  if (!state.settings) state.settings = { captchaApiKey: '', captchaProvider: 'captchaai' };
   const persist = () => store.save(state);
   const scheduler = new Scheduler(() => state, persist);
+
+  // Bulk operations (e.g. join-all) with live progress for the dashboard.
+  const operations = [];
+  function newOperation(type, total, meta) {
+    const op = {
+      id: store.newId('op'),
+      type,
+      status: 'running',
+      total,
+      done: 0,
+      ok: 0,
+      failed: 0,
+      meta: meta || {},
+      results: [],
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    };
+    operations.unshift(op);
+    if (operations.length > 20) operations.pop();
+    return op;
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function joinDelayMs() {
+    const n = Number(process.env.JOIN_DELAY_SECONDS || 8);
+    return (Number.isFinite(n) && n >= 0 ? n : 8) * 1000;
+  }
 
   // ---- static dashboard ----
   app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -108,6 +136,113 @@ function createApp() {
     res.json({ results, tokens: state.tokens.map(store.publicToken) });
   });
 
+  // ---- settings (CaptchaAI key etc.) ----
+  app.get('/api/settings', (req, res) => {
+    res.json({ settings: store.publicSettings(state.settings) });
+  });
+
+  app.put('/api/settings', (req, res) => {
+    const { captchaApiKey, captchaProvider } = req.body || {};
+    if (captchaApiKey !== undefined) {
+      const key = String(captchaApiKey || '').trim();
+      if (key && key.length < 8) {
+        return res.status(400).json({ error: 'That API key looks too short.' });
+      }
+      state.settings.captchaApiKey = key;
+      logger.info('settings', key ? 'CaptchaAI API key saved.' : 'CaptchaAI API key removed.');
+    }
+    if (captchaProvider !== undefined) {
+      state.settings.captchaProvider = String(captchaProvider || 'captchaai').slice(0, 40);
+    }
+    persist();
+    res.json({ settings: store.publicSettings(state.settings) });
+  });
+
+  // ---- server joiner ----
+  app.get('/api/operations', (req, res) => {
+    res.json({ operations: operations.slice(0, 20) });
+  });
+
+  app.post('/api/tokens/join-all', async (req, res) => {
+    let code;
+    try {
+      code = parseInvite((req.body || {}).invite);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+    const targets = state.tokens.filter((t) => t.status !== 'invalid');
+    if (targets.length === 0) {
+      return res.status(400).json({ error: 'No active tokens to join with. Add tokens first.' });
+    }
+    const delayMs = joinDelayMs();
+    const op = newOperation('join-all', targets.length, { invite: code });
+    logger.info('join', `Join-all started: ${targets.length} account(s) → invite ${code} (~${Math.max(1, Math.round(delayMs / 1000))}s apart)`);
+    res.status(202).json({ operation: op });
+
+    (async () => {
+      for (const t of targets) {
+        try {
+          await joinInvite(t, code, async (challenge) => {
+            logger.warn('join', `Captcha challenge for ${t.username} (service: ${challenge.service}) — solving via CaptchaAI…`);
+            try {
+              return await solveDiscordCaptcha({
+                settings: state.settings,
+                sitekey: challenge.sitekey,
+                service: challenge.service,
+                rqdata: challenge.rqdata,
+                username: t.username,
+              });
+            } catch (solveErr) {
+              logger.error('captcha', `Captcha solve failed for ${t.username}: ${solveErr.message}`);
+              throw solveErr;
+            }
+          });
+          op.results.push({ tokenId: t.id, username: t.username, ok: true });
+          op.ok += 1;
+          logger.info('join', `✓ ${t.username} joined ${code}`);
+        } catch (err) {
+          const reason = err.message === 'captcha_required'
+            ? 'captcha required (no usable solver key)'
+            : err.message;
+          op.results.push({ tokenId: t.id, username: t.username, ok: false, error: reason });
+          op.failed += 1;
+          logger.error('join', `✗ ${t.username}: ${reason}`);
+          if (err.status === 429 && err.retryAfter) {
+            const wait = Math.ceil(Number(err.retryAfter) * 1000) + 1000;
+            logger.warn('join', `Rate limited — pausing joins for ~${Math.round(wait / 1000)}s`);
+            await sleep(wait);
+          }
+        }
+        op.done += 1;
+        if (t !== targets[targets.length - 1]) await sleep(delayMs + Math.random() * 3000);
+      }
+      op.status = 'done';
+      op.finishedAt = new Date().toISOString();
+      logger.info('join', `Join-all finished: ${op.ok} joined, ${op.failed} failed`);
+    })().catch((err) => {
+      op.status = 'done';
+      op.finishedAt = new Date().toISOString();
+      logger.error('join', `Join-all crashed: ${err.message}`);
+    });
+  });
+
+  // ---- progress / stats ----
+  app.get('/api/stats', (req, res) => {
+    const active = state.tokens.filter((t) => t.status !== 'invalid');
+    res.json({
+      tokens: { total: state.tokens.length, active: active.length, invalid: state.tokens.length - active.length },
+      tasks: {
+        total: state.tasks.length,
+        enabled: state.tasks.filter((t) => t.enabled).length,
+        messagesSent: state.tasks.reduce((n, t) => n + (t.runCount || 0), 0),
+      },
+      captcha: { configured: Boolean(state.settings.captchaApiKey) },
+      operations: operations.slice(0, 5).map((o) => ({
+        id: o.id, type: o.type, status: o.status,
+        total: o.total, done: o.done, ok: o.ok, failed: o.failed,
+      })),
+    });
+  });
   // ---- tasks ----
   app.get('/api/tasks', (req, res) => {
     res.json({ tasks: state.tasks, minIntervalSeconds: scheduler.minIntervalSeconds() });
@@ -231,6 +366,7 @@ function createApp() {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
     });
     res.write(': connected\n\n');
     const unsubscribe = logger.subscribe(res);

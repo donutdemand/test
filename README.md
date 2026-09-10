@@ -6,6 +6,10 @@ An automated Discord messaging bot that manages **multiple Discord account token
 - ✅ **Check-all button** re-validates every token (spots locked/invalid ones without re-pasting)
 - 💬 **Messaging tasks** — each task sends from one account to one channel, rotating through messages (random or round-robin), every N seconds with optional jitter
 - 🧪 **One-click test sends** to verify a token + channel pairing
+- 🚪 **Server joiner** — paste one invite link, every active account joins one-by-one with delays; per-account results + a live progress bar
+- 🧩 **CaptchaAI key in Settings** — when Discord answers a join with a captcha challenge, it's solved with your key and retried; every step streams to the log
+- 📊 **Progress tracking** — header stats (tokens / tasks / messages sent), per-task send counts, join operations with ✅/❌ breakdowns, and a filterable live log
+- 🐳 **Coolify-ready** — `Dockerfile` + `docker-compose.yml` + [`COOLIFY.md`](COOLIFY.md); listens on `0.0.0.0:$PORT`, health check at `/health`
 - 📜 **Live activity log** (SSE) showing sends, errors, and rate-limit backoffs
 - 🔒 Tokens are stored server-side only; the API/UI only ever shows masked previews
 - ⏳ Built-in minimum-interval guard + `429` backoff so you don't hammer the Discord API
@@ -55,6 +59,10 @@ DISCORD_TOKENS=tokenA,tokenB npm start
 | `POST` | `/api/tasks/:id/toggle` | Pause/resume |
 | `DELETE` | `/api/tasks/:id` | Delete task |
 | `POST` | `/api/send-test` | Immediate send (`tokenId`, `channelId`, `message`) |
+| `POST` | `/api/tokens/join-all` | All active accounts join an invite (`{"invite"}`), returns operation with live progress |
+| `GET` | `/api/operations` | Recent bulk operations with per-account results |
+| `GET` | `/api/stats` | Totals: tokens, tasks, messages sent, captcha status |
+| `GET` / `PUT` | `/api/settings` | CaptchaAI key (stored server-side, returned masked) |
 | `GET` | `/api/logs?limit=` | Recent logs |
 | `GET` | `/api/events` | SSE live log stream |
 
@@ -74,6 +82,14 @@ Task body:
 ```
 
 Constraints: `intervalSeconds ≥ MIN_INTERVAL_SECONDS` (default 5), messages ≤ 2000 chars, max 50 messages per task.
+
+## Deploy (Coolify)
+
+See [`COOLIFY.md`](COOLIFY.md) — build from the `Dockerfile` on port `3000`, point your Coolify domain at it, mount `/app/data` so tokens survive redeploys.
+
+```bash
+docker compose up --build -d  # local Docker equivalent
+```
 
 ## Safety tips
 

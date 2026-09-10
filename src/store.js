@@ -7,7 +7,7 @@ function resolveStorePath() {
 }
 
 function blankStore() {
-  return { tokens: [], tasks: [] };
+  return { tokens: [], tasks: [], settings: { captchaApiKey: '', captchaProvider: 'captchaai' } };
 }
 
 /** Mask a token for API responses — the full secret never leaves the server. */
@@ -38,10 +38,24 @@ function load() {
     return {
       tokens: Array.isArray(data.tokens) ? data.tokens : [],
       tasks: Array.isArray(data.tasks) ? data.tasks : [],
+      settings: {
+        captchaApiKey: data.settings?.captchaApiKey || '',
+        captchaProvider: data.settings?.captchaProvider || 'captchaai',
+      },
     };
   } catch {
     return blankStore();
   }
+}
+
+/** Settings as safe for the API — the key itself never leaves the server. */
+function publicSettings(settings) {
+  const key = settings?.captchaApiKey || '';
+  return {
+    captchaProvider: settings?.captchaProvider || 'captchaai',
+    captchaKeyConfigured: key.length > 0,
+    captchaKeyMasked: key ? maskToken(key) : null,
+  };
 }
 
 function save(state) {
@@ -56,4 +70,4 @@ function newId(prefix) {
   return `${prefix}_${crypto.randomBytes(6).toString('hex')}`;
 }
 
-module.exports = { load, save, newId, publicToken, blankStore, resolveStorePath };
+module.exports = { load, save, newId, publicToken, publicSettings, maskToken, blankStore, resolveStorePath };

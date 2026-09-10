@@ -21,6 +21,7 @@
   <div class="top-stats">
     <div class="stat"><span id="statTokens">0</span><label>tokens</label></div>
     <div class="stat"><span id="statTasks">0</span><label>tasks</label></div>
+    <div class="stat"><span id="statSent">0</span><label>sent</label></div>
     <div class="stat live"><span class="pulse"></span><label>live logs</label></div>
   </div>
 </header>
@@ -76,6 +77,31 @@
 
   <section class="card">
     <div class="card-head">
+      <h2>🚪 Server joiner</h2>
+      <p>Paste a server invite link — every active account joins it, one by one with delays. Captchas are solved with your saved key when possible; everything streams into the log below.</p>
+    </div>
+    <form id="joinForm" class="task-form">
+      <label>Invite link or code<input id="joinInvite" placeholder="https://discord.gg/abc123 or discord.com/invite/abc123" /></label>
+      <button type="submit" class="btn primary">Join all accounts</button>
+    </form>
+    <div id="opList" class="task-list"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>🧩 CaptchaAI key</h2>
+      <p>Used when Discord throws a captcha during joins. Stored server-side, shown masked. <span id="captchaStatus" class="badge user">not set</span></p>
+    </div>
+    <form id="captchaForm" class="row-form">
+      <input id="captchaKey" type="password" placeholder="Paste CaptchaAI API key…" autocomplete="off" />
+      <button type="submit" class="btn ghost">Save</button>
+      <button type="button" id="captchaRemove" class="btn small danger">Remove</button>
+    </form>
+    <div class="hint">Without a key, captcha-blocked joins are marked <code>captcha_failed</code> in the log so you can complete them by hand. Solver endpoint can be overridden with <code>CAPTCHAAI_API_URL</code> (CapSolver-style <code>createTask</code> flow).</div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
       <h2>🧪 Send a test message</h2>
       <p>Verify a token + channel pairing instantly before automating it.</p>
     </div>
@@ -91,8 +117,19 @@
 
   <section class="card wide">
     <div class="card-head row">
-      <div><h2>📜 Live activity</h2><p> Sends, errors, rate limits and token events stream here.</p></div>
-      <button id="clearLogs" class="btn small">Clear</button>
+      <div><h2>📜 Live activity</h2><p>Sends, joins, captchas, rate limits and token events stream here.</p></div>
+      <div class="log-tools">
+        <select id="logFilter">
+          <option value="all">all</option>
+          <option value="send">sends</option>
+          <option value="join">joins</option>
+          <option value="captcha">captcha</option>
+          <option value="tokens">tokens</option>
+          <option value="tasks">tasks</option>
+          <option value="scheduler">scheduler</option>
+        </select>
+        <button id="clearLogs" class="btn small">Clear</button>
+      </div>
     </div>
     <div id="logView" class="logs"></div>
   </section>

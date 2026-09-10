@@ -5,6 +5,7 @@ const store = require('./store');
 const logger = require('./logger');
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
 
 async function preloadTokens(state, persist) {
   const envTokens = String(process.env.DISCORD_TOKENS || '')
@@ -41,8 +42,8 @@ async function main() {
   await preloadTokens(getState(), persist);
   scheduler.startAll();
 
-  const server = app.listen(PORT, () => {
-    logger.info('boot', `Dashboard live at http://localhost:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    logger.info('boot', `Dashboard live at http://${HOST}:${PORT}`);
     const { tokens, tasks } = getState();
     logger.info('boot', `${tokens.length} token(s), ${tasks.filter((t) => t.enabled).length}/${tasks.length} task(s) enabled`);
   });

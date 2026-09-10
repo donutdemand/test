@@ -14,6 +14,8 @@ const api = {
 
 let tokens = [];
 let tasks = [];
+let operations = [];
+let logFilter = 'all';
 
 function toast(msg) {
   const el = $('toast');
@@ -30,14 +32,52 @@ function esc(s) {
 }
 
 async function refresh() {
-  const [t, k] = await Promise.all([api.get('/api/tokens'), api.get('/api/tasks')]);
+  const [t, k, s, o, cfg] = await Promise.all([
+    api.get('/api/tokens'), api.get('/api/tasks'),
+    api.get('/api/stats'), api.get('/api/operations'),
+    api.get('/api/settings'),
+  ]);
   tokens = t.tokens || [];
   tasks = k.tasks || [];
+  operations = o.operations || [];
   $('statTokens').textContent = tokens.length;
   $('statTasks').textContent = tasks.filter((x) => x.enabled).length + '/' + tasks.length;
+  $('statSent').textContent = s?.tasks?.messagesSent ?? tasks.reduce((n, x) => n + (x.runCount || 0), 0);
   renderTokens();
   renderTasks();
+  renderOperations();
+  renderCaptchaStatus(cfg?.settings);
   syncSelects();
+}
+
+function renderOperations() {
+  const box = $('opList');
+  if (!operations.length) {
+    box.innerHTML = '<div class="hint">No join runs yet — paste an invite above to run all accounts.</div>';
+    return;
+  }
+  box.innerHTML = operations.slice(0, 5).map((op) => {
+    const pct = op.total ? Math.round((op.done / op.total) * 100) : 0;
+    const fails = (op.results || []).filter((r) => !r.ok).slice(0, 8);
+    return `
+    <div class="task-card">
+      <div class="top">
+        <strong><span class="dot ${op.status === 'running' ? 'on' : 'off'}"></span>join-all → <code>${esc(op.meta?.invite || '')}</code></strong>
+        <span class="badge ${op.status === 'running' ? 'bot' : 'user'}">${op.status === 'running' ? `${op.done}/${op.total}` : 'done'}</span>
+      </div>
+      <div class="progress"><div class="bar" style="width:${pct}%"></div></div>
+      <div class="detail">✅ ${esc(op.ok)} joined · ❌ ${esc(op.failed)} failed · started ${esc(new Date(op.startedAt).toLocaleString())}</div>
+      ${fails.length ? `<div class="err">${fails.map((f) => `⚠ ${esc(f.username)}: ${esc(f.error || 'failed')}`).join('<br/>')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderCaptchaStatus(settings) {
+  const el = $('captchaStatus');
+  if (!el) return;
+  const on = Boolean(settings?.captchaKeyConfigured);
+  el.textContent = on ? `set ${settings?.captchaKeyMasked || ''}` : 'not set';
+  el.className = `badge ${on ? 'bot' : 'user'}`;
 }
 
 function renderTokens() {
@@ -173,6 +213,62 @@ $('testForm').addEventListener('submit', async (e) => {
 
 $('clearLogs').addEventListener('click', () => { $('logView').innerHTML = ''; });
 
+$('joinForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const invite = $('joinInvite').value.trim();
+  if (!invite) return;
+  try {
+    await api.send('/api/tokens/join-all', 'POST', { invite });
+    $('joinInvite').value = '';
+    toast('Join-all started — watch progress + logs ✓');
+    pollOperations();
+  } catch (err) { toast(err.message); }
+});
+
+let opTimer = null;
+async function pollOperations() {
+  clearTimeout(opTimer);
+  try {
+    const o = await api.get('/api/operations');
+    operations = o.operations || [];
+    renderOperations();
+    const s = await api.get('/api/stats');
+    $('statSent').textContent = s?.tasks?.messagesSent ?? 0;
+    if (operations.some((x) => x.status === 'running')) {
+      opTimer = setTimeout(pollOperations, 2500);
+    } else {
+      await refresh();
+    }
+  } catch { /* keep old state on blip */ }
+}
+
+$('captchaForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const v = $('captchaKey').value.trim();
+  if (!v) return;
+  try {
+    await api.send('/api/settings', 'PUT', { captchaApiKey: v });
+    $('captchaKey').value = '';
+    await refresh();
+    toast('CaptchaAI key saved ✓');
+  } catch (err) { toast(err.message); }
+});
+
+$('captchaRemove').addEventListener('click', async () => {
+  try {
+    await api.send('/api/settings', 'PUT', { captchaApiKey: '' });
+    await refresh();
+    toast('CaptchaAI key removed');
+  } catch (err) { toast(err.message); }
+});
+
+$('logFilter').addEventListener('change', (e) => {
+  logFilter = e.target.value;
+  for (const el of $('logView').children) {
+    el.style.display = (logFilter === 'all' || el.dataset.scope === logFilter) ? '' : 'none';
+  }
+});
+
 $('revalidateBtn').addEventListener('click', async () => {
   toast('Checking all tokens…');
   try {
@@ -186,6 +282,8 @@ $('revalidateBtn').addEventListener('click', async () => {
 function addLog(entry) {
   const el = document.createElement('div');
   el.className = `log-${entry.level}`;
+  el.dataset.scope = entry.scope;
+  if (logFilter !== 'all' && entry.scope !== logFilter) el.style.display = 'none';
   el.innerHTML = `<span class="log-ts">${esc(new Date(entry.ts).toLocaleTimeString())}</span><strong>[${esc(entry.scope)}]</strong> ${esc(entry.message)}`;
   const view = $('logView');
   view.appendChild(el);

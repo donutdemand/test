@@ -91,4 +91,75 @@ function isSnowflake(id) {
   return SNOWFLAKE_RE.test(String(id || ''));
 }
 
-module.exports = { validateToken, sendChannelMessage, isSnowflake };
+/** Accept a full invite URL (`discord.gg/abc`, `discord.com/invite/abc`) or a raw code. */
+function parseInvite(input) {
+  const raw = String(input || '').trim();
+  if (!raw) {
+    const err = new Error('Paste a Discord server invite link or code.');
+    err.status = 400;
+    throw err;
+  }
+  const m = raw.match(/(?:discord(?:app)?\.com\/invite\/|discord\.gg\/)([A-Za-z0-9-]+)/i);
+  const code = (m ? m[1] : raw).trim();
+  if (!/^[A-Za-z0-9-]{2,32}$/.test(code)) {
+    const err = new Error('Could not read an invite code from that link.');
+    err.status = 400;
+    throw err;
+  }
+  return code;
+}
+
+/**
+ * Join a server with one stored token. If Discord answers with a captcha
+ * challenge and `solveCaptcha` is provided, it is called with the challenge
+ * and the join is retried once with the solution.
+ */
+async function joinInvite(stored, code, solveCaptcha) {
+  const attempt = async (captchaKey) => {
+    const res = await fetch(`${API_BASE}/invites/${code}`, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader(stored),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(captchaKey ? { captcha_key: captchaKey } : {}),
+    });
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      const err = new Error(`Rate limited. Retry after ~${data.retry_after ?? '?'}s.`);
+      err.status = 429;
+      err.retryAfter = data.retry_after;
+      throw err;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data?.captcha_sitekey && solveCaptcha) {
+        const err = new Error('captcha_required');
+        err.captcha = {
+          sitekey: data.captcha_sitekey,
+          service: data.captcha_service || 'hcaptcha',
+          rqdata: data.captcha_rqdata || data.rqdata || null,
+        };
+        throw err;
+      }
+      const msg = data?.message || `HTTP ${res.status}`;
+      const err = new Error(`Join failed (${msg})`);
+      err.status = res.status;
+      err.code = data?.code;
+      throw err;
+    }
+    return data;
+  };
+
+  try {
+    return await attempt(null);
+  } catch (err) {
+    if (err.message === 'captcha_required' && solveCaptcha) {
+      const key = await solveCaptcha(err.captcha);
+      return await attempt(key);
+    }
+    throw err;
+  }
+}
+
+module.exports = { validateToken, sendChannelMessage, isSnowflake, parseInvite, joinInvite };
