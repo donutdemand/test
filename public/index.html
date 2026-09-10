@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Discord Multi-Token Messenger</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+<div class="bg-glow"></div>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">✦</div>
+    <div>
+      <h1>Discord Multi-Token Messenger</h1>
+      <p>Automate messages across many tokens &amp; channels</p>
+    </div>
+  </div>
+  <div class="top-stats">
+    <div class="stat"><span id="statTokens">0</span><label>tokens</label></div>
+    <div class="stat"><span id="statTasks">0</span><label>tasks</label></div>
+    <div class="stat live"><span class="pulse"></span><label>live logs</label></div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="card">
+    <div class="card-head">
+      <h2>🔑 Discord tokens</h2>
+      <p>Add as many bot tokens as you like. Full secrets never leave the server — only masked previews are shown.</p>
+    </div>
+    <form id="tokenForm" class="row-form">
+      <input id="tokenInput" type="password" placeholder="Paste a Bot token (prefix Bot is optional)…" autocomplete="off" />
+      <button type="submit" class="btn primary">Add token</button>
+    </form>
+    <form id="bulkForm" class="row-form">
+      <input id="bulkInput" type="password" placeholder="Bulk add: paste several tokens, comma or newline separated…" autocomplete="off" />
+      <button type="submit" class="btn ghost">Bulk add</button>
+    </form>
+    <div id="tokenList" class="token-grid"></div>
+    <div class="hint">⚠️ Use <strong>bot tokens</strong> from the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Developer Portal</a>. Automating user accounts (self-bots) violates Discord's ToS and can get accounts banned.</div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>💬 Messaging tasks</h2>
+      <p>Each task sends rotating messages to one channel on a timer, with optional random jitter.</p>
+    </div>
+    <form id="taskForm" class="task-form">
+      <div class="grid2">
+        <label>Task name<input id="taskName" placeholder="e.g. Announcements loop" /></label>
+        <label>Token<select id="taskToken"></select></label>
+      </div>
+      <div class="grid2">
+        <label>Channel ID<input id="taskChannel" placeholder="e.g. 123456789012345678" /></label>
+        <label>Rotation
+          <select id="taskRotation">
+            <option value="random">Random pick</option>
+            <option value="round-robin">Round-robin</option>
+          </select>
+        </label>
+      </div>
+      <label>Messages (one per line — one is picked per run)<textarea id="taskMessages" rows="4" placeholder="Hello everyone!&#10;Don't forget to check #rules"></textarea></label>
+      <div class="grid3">
+        <label>Every (sec)<input id="taskInterval" type="number" min="5" value="60" /></label>
+        <label>Jitter (sec)<input id="taskJitter" type="number" min="0" value="15" /></label>
+        <label class="check"><input id="taskEnabled" type="checkbox" checked /> Start enabled</label>
+      </div>
+      <button type="submit" class="btn primary">Create task</button>
+    </form>
+    <div id="taskList" class="task-list"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>🧪 Send a test message</h2>
+      <p>Verify a token + channel pairing instantly before automating it.</p>
+    </div>
+    <form id="testForm" class="task-form">
+      <div class="grid2">
+        <label>Token<select id="testToken"></select></label>
+        <label>Channel ID<input id="testChannel" placeholder="Channel ID" /></label>
+      </div>
+      <label>Message<input id="testMessage" placeholder="Hello from the multi-token bot!" /></label>
+      <button type="submit" class="btn ghost">Send now</button>
+    </form>
+  </section>
+
+  <section class="card wide">
+    <div class="card-head row">
+      <div><h2>📜 Live activity</h2><p> Sends, errors, rate limits and token events stream here.</p></div>
+      <button id="clearLogs" class="btn small">Clear</button>
+    </div>
+    <div id="logView" class="logs"></div>
+  </section>
+</main>
+
+<footer>Built for managing many Discord tokens safely · keeps secrets server-side · respects rate limits</footer>
+<div id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
