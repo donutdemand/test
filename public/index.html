@@ -93,11 +93,12 @@
       <p>Used when Discord throws a captcha during joins. Stored server-side, shown masked. <span id="captchaStatus" class="badge user">not set</span></p>
     </div>
     <form id="captchaForm" class="row-form">
-      <input id="captchaKey" type="password" placeholder="Paste CaptchaAI API key…" autocomplete="off" />
+      <input id="captchaKey" type="password" placeholder="Paste CaptchaAI API key (32 chars)…" autocomplete="off" />
       <button type="submit" class="btn ghost">Save</button>
+      <button type="button" id="captchaBalance" class="btn small" title="Verify the saved key with the solver">Check balance</button>
       <button type="button" id="captchaRemove" class="btn small danger">Remove</button>
     </form>
-    <div class="hint">Without a key, captcha-blocked joins are marked <code>captcha_failed</code> in the log so you can complete them by hand. Solver endpoint can be overridden with <code>CAPTCHAAI_API_URL</code> (CapSolver-style <code>createTask</code> flow).</div>
+    <div class="hint">Without a key, captcha-blocked joins are marked <code>captcha_failed</code> in the log so you can complete them by hand. Solves go to <code>ocr.captchaai.com</code> (<code>in.php</code>/<code>res.php</code>); override with <code>CAPTCHAAI_API_URL</code> if needed. You need active threads on your CaptchaAI account or submits fail with <code>ERROR_ZERO_BALANCE</code>.</div>
   </section>
 
   <section class="card">
