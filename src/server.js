@@ -1,7 +1,7 @@
 const path = require('path');
 const express = require('express');
 const { validateToken, sendChannelMessage, isSnowflake, parseInvite, joinInvite } = require('./discord');
-const { solveDiscordCaptcha } = require('./captcha');
+const { solveDiscordCaptcha, getBalance } = require('./captcha');
 const store = require('./store');
 const logger = require('./logger');
 const Scheduler = require('./scheduler');
@@ -158,6 +158,21 @@ function createApp() {
     res.json({ settings: store.publicSettings(state.settings) });
   });
 
+  // Verify the saved CaptchaAI key (balance/threads) without spending a solve.
+  app.get('/api/settings/captcha-balance', async (req, res) => {
+    if (!state.settings.captchaApiKey) {
+      return res.status(400).json({ error: 'No CaptchaAI key saved yet.' });
+    }
+    try {
+      const balance = await getBalance(state.settings.captchaApiKey);
+      logger.info('captcha', `CaptchaAI balance check OK: ${balance}`);
+      res.json({ balance });
+    } catch (err) {
+      logger.error('captcha', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   // ---- server joiner ----
   app.get('/api/operations', (req, res) => {
     res.json({ operations: operations.slice(0, 20) });
@@ -189,7 +204,7 @@ function createApp() {
                 settings: state.settings,
                 sitekey: challenge.sitekey,
                 service: challenge.service,
-                rqdata: challenge.rqdata,
+                pageUrl: `https://discord.gg/${code}`,
                 username: t.username,
               });
             } catch (solveErr) {

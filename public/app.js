@@ -254,6 +254,14 @@ $('captchaForm').addEventListener('submit', async (e) => {
   } catch (err) { toast(err.message); }
 });
 
+$('captchaBalance').addEventListener('click', async () => {
+  toast('Checking CaptchaAI key…');
+  try {
+    const r = await api.get('/api/settings/captcha-balance');
+    toast(r.error ? `Balance check: ${r.error}` : `CaptchaAI key OK — balance/threads: ${r.balance}`);
+  } catch (err) { toast(err.message); }
+});
+
 $('captchaRemove').addEventListener('click', async () => {
   try {
     await api.send('/api/settings', 'PUT', { captchaApiKey: '' });

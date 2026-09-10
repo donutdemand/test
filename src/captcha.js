@@ -1,21 +1,22 @@
 const logger = require('./logger');
 
-// CaptchaAI-compatible solver plumbing.
+// CaptchaAI solver integration (2Captcha-style in.php / res.php protocol).
 //
-// When Discord answers a join/send with a captcha challenge (a payload with
-// `captcha_sitekey` / `captcha_service`), the dashboard shows it in the logs
-// and — if the user stored a CaptchaAI API key in Settings — we attempt to
-// solve it through the provider and retry the request with the solution.
+// Docs: https://blog.captchaai.com/captchaai-quickstart
+//   Submit: POST {base}/in.php { key, method: 'hcaptcha', sitekey, pageurl, json: 1 }
+//     → { status: 1, request: '<taskId>' }
+//   Poll:   GET {base}/res.php?key=..&action=get&id=..&json=1  (first poll after ~15s, then every 5s)
+//     → { status: 1, request: '<token>' }  or  { status: 0, request: 'CAPCHA_NOT_READY' }
 //
-// The exact HTTP shape differs between solver providers, so the endpoint is
-// overridable via CAPTCHAAI_API_URL. The default targets a CapSolver-style
-// `createTask` flow; if the provider answers differently the attempt is
-// logged as failed and the join is marked `captcha_failed` instead of
-// silently pretending it worked.
+// Base URL override: CAPTCHAAI_API_URL (default https://ocr.captchaai.com).
+// Every step is logged so the dashboard shows progress.
+
+const FIRST_POLL_DELAY_MS = 15000;
+const POLL_EVERY_MS = 5000;
 
 function solverBaseUrl() {
   return (
-    process.env.CAPTCHAAI_API_URL || 'https://api.captcha.ai/capsolver'
+    process.env.CAPTCHAAI_API_URL || 'https://ocr.captchaai.com'
   ).replace(/\/+$/, '');
 }
 
@@ -23,71 +24,131 @@ function hasKey(settings) {
   return Boolean(settings?.captchaApiKey);
 }
 
-async function createHcaptchaTask({ apiKey, sitekey, pageUrl, rqdata }) {
-  const res = await fetch(`${solverBaseUrl()}/createTask`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      clientKey: apiKey,
-      task: {
-        type: 'HCaptchaTaskProxyLess',
-        websiteURL: pageUrl || 'https://discord.com',
-        websiteKey: sitekey,
-        ...(rqdata ? { enterprisePayload: { rqdata } } : {}),
-      },
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.errorId || !data.taskId) {
-    throw new Error(
-      `Solver rejected the task: ${data.errorDescription || data.error || `HTTP ${res.status}`}`
-    );
-  }
-  return data.taskId;
+function networkError(url, err) {
+  const host = (() => { try { return new URL(url).host; } catch { return url; } })();
+  const cause = err?.cause ? `: ${err.cause.message || err.cause.code || err.cause}` : '';
+  return new Error(`Could not reach solver at ${host}${cause || `: ${err.message}`}`);
 }
 
-async function pollTaskResult({ apiKey, taskId, timeoutMs = 90000 }) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    await new Promise((r) => setTimeout(r, 5000));
-    const res = await fetch(`${solverBaseUrl()}/getTaskResult`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientKey: apiKey, taskId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (data.status === 'ready') return data.solution;
-    if (data.status === 'failed' || data.errorId) {
-      throw new Error(`Solver failed: ${data.errorDescription || data.error || 'unknown'}`);
-    }
+/** Parse a solver reply (JSON with json=1, or plain-text pipe format). */
+function parseReply(text, status) {
+  const raw = String(text || '').trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    if (/^OK\|/.test(raw)) return { status: 1, request: raw.slice(3) };
+    throw new Error(`Solver error: ${raw.slice(0, 140) || `HTTP ${status}`}`);
   }
-  throw new Error('Solver timed out waiting for a solution.');
+}
+
+async function submitHcaptcha({ apiKey, sitekey, pageUrl }) {
+  const url = `${solverBaseUrl()}/in.php`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ key: apiKey, method: 'hcaptcha', sitekey, pageurl: pageUrl, json: '1' }),
+    });
+  } catch (err) {
+    throw networkError(url, err);
+  }
+  const data = parseReply(await res.text().catch(() => ''), res.status);
+  if (data.status !== 1) {
+    throw new Error(`Solver rejected the task: ${describeError(data.request)}`);
+  }
+  return String(data.request);
+}
+
+function describeError(code) {
+  const known = {
+    ERROR_WRONG_USER_KEY: 'bad API key format (CaptchaAI keys are 32 chars — re-copy it from the dashboard)',
+    ERROR_KEY_DOES_NOT_EXIST: 'key not recognised — re-copy it from the CaptchaAI dashboard',
+    ERROR_ZERO_BALANCE: 'no available threads/balance on the CaptchaAI account',
+    ERROR_NO_SLOT_AVAILABLE: 'no solver slot free right now (transient — retry)',
+    ERROR_ZERO_CAPTCHA_FILESIZE: 'empty captcha payload sent',
+    ERROR_WRONG_FILE_EXTENSION: 'bad file type sent',
+    ERROR_TOO_BIG_CAPTCHA_FILESIZE: 'captcha payload too large',
+    ERROR_WRONG_ID_FORMAT: 'bad task id when polling',
+    ERROR_CAPTCHA_UNSOLVABLE: 'solver could not solve it (often wrong sitekey for the page)',
+    ERROR_BAD_PARAMETERS: 'bad parameters — usually a missing/wrong sitekey or pageurl',
+    ERROR_PAGEURL: 'missing pageurl parameter',
+    ERROR_WRONG_GOOGLEKEY: 'sitekey blank or malformed',
+    ERROR_BAD_TOKEN_OR_PAGEURL: 'token/sitekey mismatch for the page',
+  };
+  const c = String(code || 'unknown error');
+  return known[c] ? `${c} — ${known[c]}` : c;
+}
+
+async function pollSolution({ apiKey, taskId, timeoutMs = 120000, username }) {
+  const who = username ? ` for ${username}` : '';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  await sleep(FIRST_POLL_DELAY_MS);
+  const started = Date.now();
+  for (;;) {
+    const qs = new URLSearchParams({ key: apiKey, action: 'get', id: String(taskId), json: '1' });
+    const url = `${solverBaseUrl()}/res.php?${qs}`;
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      throw networkError(url, err);
+    }
+    const data = parseReply(await res.text().catch(() => ''), res.status);
+    if (data.request === 'CAPCHA_NOT_READY') {
+      if (Date.now() - started > timeoutMs) {
+        throw new Error(`Solver timed out after ~${Math.round(timeoutMs / 1000)}s${who}.`);
+      }
+      await sleep(POLL_EVERY_MS);
+      continue;
+    }
+    if (data.status === 1 && data.request) return String(data.request);
+    throw new Error(`Solver failed: ${describeError(data.request)}`);
+  }
 }
 
 /**
- * Attempt to solve a Discord captcha challenge. Returns the solution token
- * string, or throws. Every step is logged so the dashboard shows progress.
+ * Solve a Discord captcha challenge. Returns the solution token string.
+ * Every step is logged so the dashboard shows progress.
  */
-async function solveDiscordCaptcha({ settings, sitekey, service, rqdata, username }) {
+async function solveDiscordCaptcha({ settings, sitekey, service, pageUrl, username }) {
   const who = username ? ` for ${username}` : '';
   if (!hasKey(settings)) {
     throw new Error('Captcha required but no CaptchaAI key is saved in Settings.');
   }
-  if ((service || '').toLowerCase() !== 'hcaptcha') {
-    throw new Error(`Unsupported captcha service "${service || 'unknown'}" — only hCaptcha is handled.`);
+  if (!sitekey) {
+    throw new Error('Discord sent a captcha challenge without a sitekey — cannot solve automatically.');
   }
-  logger.info('captcha', `Solving ${service || 'hCaptcha'} challenge${who} via solver…`);
-  const taskId = await createHcaptchaTask({
+  if (service && String(service).toLowerCase() !== 'hcaptcha') {
+    throw new Error(`Unsupported captcha service "${service}" — only hCaptcha is handled.`);
+  }
+  logger.info('captcha', `Submitting hCaptcha challenge${who} to CaptchaAI…`);
+  const taskId = await submitHcaptcha({
     apiKey: settings.captchaApiKey,
     sitekey,
-    rqdata,
+    pageUrl: pageUrl || 'https://discord.com',
   });
   logger.info('captcha', `Solver accepted task ${taskId}${who}, waiting for solution…`);
-  const solution = await pollTaskResult({ apiKey: settings.captchaApiKey, taskId });
-  const token = solution?.gRecaptchaResponse || solution?.token || solution?.text;
-  if (!token) throw new Error('Solver returned an empty solution.');
+  const token = await pollSolution({ apiKey: settings.captchaApiKey, taskId, username });
   logger.info('captcha', `Captcha solved${who}, retrying…`);
   return token;
 }
 
-module.exports = { solveDiscordCaptcha, hasKey, solverBaseUrl };
+/** Check key validity / threads. Returns the raw balance string. */
+async function getBalance(apiKey) {
+  const qs = new URLSearchParams({ key: apiKey, action: 'getbalance', json: '1' });
+  const url = `${solverBaseUrl()}/res.php?${qs}`;
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw networkError(url, err);
+  }
+  const data = parseReply(await res.text().catch(() => ''), res.status);
+  if (data.status !== 1) {
+    throw new Error(`Balance check failed: ${describeError(data.request)}`);
+  }
+  return String(data.request);
+}
+
+module.exports = { solveDiscordCaptcha, getBalance, hasKey, solverBaseUrl };
