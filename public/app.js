@@ -43,15 +43,16 @@ async function refresh() {
 function renderTokens() {
   const box = $('tokenList');
   if (!tokens.length) {
-    box.innerHTML = '<div class="hint">No tokens yet — paste your first bot token above to get started.</div>';
+    box.innerHTML = '<div class="hint">No account tokens yet — paste your first token above to get started.</div>';
     return;
   }
   box.innerHTML = tokens.map((t) => `
     <div class="token-card">
       <div class="avatar">${esc((t.username || '?')[0].toUpperCase())}</div>
       <div class="meta">
-        <strong>${esc(t.username)} <span class="badge ${esc(t.authType)}">${esc(t.authType)}</span></strong>
+        <strong>${esc(t.username)} <span class="badge ${esc(t.authType)}">${esc(t.authType === 'user' ? 'account' : t.authType)}</span>${t.status === 'invalid' ? ' <span class="badge user">invalid</span>' : ''}</strong>
         <code>${esc(t.masked)} · ${esc(t.userId || '')}</code>
+        ${t.lastError ? `<div class="err">⚠ ${esc(t.lastError)}</div>` : ''}
       </div>
       <button class="btn small danger" onclick="removeToken('${t.id}')">Remove</button>
     </div>`).join('');
@@ -91,7 +92,7 @@ function syncSelects() {
   for (const id of ['taskToken', 'testToken']) {
     const sel = $(id);
     sel.innerHTML = tokens.length
-      ? tokens.map((t) => `<option value="${t.id}">${esc(t.username)} (${esc(t.authType)})</option>`).join('')
+      ? tokens.map((t) => `<option value="${t.id}">${esc(t.username)} (${esc(t.authType === 'user' ? 'account' : t.authType)})</option>`).join('')
       : '<option value="">— add a token first —</option>';
   }
 }
@@ -171,6 +172,16 @@ $('testForm').addEventListener('submit', async (e) => {
 });
 
 $('clearLogs').addEventListener('click', () => { $('logView').innerHTML = ''; });
+
+$('revalidateBtn').addEventListener('click', async () => {
+  toast('Checking all tokens…');
+  try {
+    const r = await api.send('/api/tokens/revalidate', 'POST');
+    await refresh();
+    const ok = (r.results || []).filter((x) => x.ok).length;
+    toast(`Check complete: ${ok}/${(r.results || []).length} active`);
+  } catch (e) { toast(e.message); }
+});
 
 function addLog(entry) {
   const el = document.createElement('div');

@@ -1,9 +1,10 @@
 # Discord Multi-Token Messenger
 
-An automated Discord messaging bot that manages **multiple Discord tokens** from one place, with scheduled/looping messages and a modern web dashboard.
+An automated Discord messaging bot that manages **multiple Discord account tokens** from one place, with scheduled/looping messages and a modern web dashboard.
 
-- 🔑 **Add unlimited tokens** — single add or bulk paste, with validation via `GET /users/@me`
-- 💬 **Messaging tasks** — each task targets one channel, rotates through messages (random or round-robin), and sends every N seconds with optional jitter
+- 🔑 **Add unlimited account tokens** — single add or bulk paste, each validated via `GET /users/@me` and shown with its username
+- ✅ **Check-all button** re-validates every token (spots locked/invalid ones without re-pasting)
+- 💬 **Messaging tasks** — each task sends from one account to one channel, rotating through messages (random or round-robin), every N seconds with optional jitter
 - 🧪 **One-click test sends** to verify a token + channel pairing
 - 📜 **Live activity log** (SSE) showing sends, errors, and rate-limit backoffs
 - 🔒 Tokens are stored server-side only; the API/UI only ever shows masked previews
@@ -24,19 +25,19 @@ Optional: preload tokens on boot (comma-separated):
 DISCORD_TOKENS=tokenA,tokenB npm start
 ```
 
-## Getting bot tokens (recommended)
+## Getting account tokens
 
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → New Application → **Bot** → Reset Token → copy it.
-2. Enable the **Message Content Intent** only if your bot needs to read messages (sending does not require privileged intents).
-3. Invite the bot to your server: OAuth2 → URL Generator → scopes `bot` (+ `applications.commands` if needed) → Bot Permissions → **Send Messages** (and View Channel) → open the URL.
-4. Paste the token into the dashboard. Copy the target **channel ID** (Discord Settings → Advanced → Developer Mode → right-click channel → Copy ID) and create a task.
+1. Open Discord in your **browser** and log into the account.
+2. Press **Ctrl+Shift+I** (DevTools) → **Application** tab → **Local Storage** → `https://discord.com` → copy the `token` value (strip any quotes).
+3. Paste it into the dashboard (or bulk-paste many at once, comma/newline separated). Each account shows up with its username; use **Check all** anytime to find locked or expired ones.
+4. Copy the target **channel ID** (Discord Settings → Advanced → Developer Mode → right-click channel → Copy ID) and create a task picking the account + channel.
 
-> ⚠️ **User tokens / self-bots:** automating a normal user account violates Discord's Terms of Service and risks a permanent ban. This project accepts raw user tokens for migration/testing convenience and flags them with a `user` badge + warning, but you should use **bot tokens**.
+> ⚠️ **Heads up:** automating user accounts violates Discord's Terms of Service and can get accounts locked or banned. Never share tokens — each one gives full access to its account. Keep intervals generous and don't use this for spam.
 
 ## How it works
 
 - No gateway connection needed — everything goes through Discord's HTTPS REST API (`/api/v10`), so dozens of tokens stay lightweight.
-- Token validation: `GET /users/@me`, trying `Bot <token>` first, then raw token (detects `bot` vs `user` auth).
+- Token validation: `GET /users/@me` with the raw account token (bot `Bot <token>` prefix tried as fallback, reported as `bot` vs `account` badge).
 - Sending: `POST /channels/:id/messages`. Tasks run as per-task timeout loops: `interval + random(0, jitter)`. HTTP `429` responses trigger a `retry_after`-based backoff.
 - Persistence: JSON file at `STORE_PATH` (default `./data/store.json`, git-ignored). In-memory live logs (last 500) stream over SSE at `/api/events`.
 
@@ -46,6 +47,7 @@ DISCORD_TOKENS=tokenA,tokenB npm start
 |---|---|---|
 | `GET` | `/api/tokens` | List tokens (masked) |
 | `POST` | `/api/tokens` | Add one (`{"token"}`) or many (`{"tokens":[]}`) |
+| `POST` | `/api/tokens/revalidate` | Re-check all stored tokens, marks invalid ones |
 | `DELETE` | `/api/tokens/:id` | Remove token (its tasks are paused) |
 | `GET` | `/api/tasks` | List tasks |
 | `POST` | `/api/tasks` | Create task |

@@ -15,7 +15,7 @@
     <div class="logo">✦</div>
     <div>
       <h1>Discord Multi-Token Messenger</h1>
-      <p>Automate messages across many tokens &amp; channels</p>
+      <p>Automate messages across many <strong>account</strong> tokens &amp; channels</p>
     </div>
   </div>
   <div class="top-stats">
@@ -28,19 +28,20 @@
 <main class="layout">
   <section class="card">
     <div class="card-head">
-      <h2>🔑 Discord tokens</h2>
-      <p>Add as many bot tokens as you like. Full secrets never leave the server — only masked previews are shown.</p>
+      <h2>🔑 Discord account tokens</h2>
+      <p>Add as many account tokens as you like — single or bulk. Each one is checked against Discord and shown with its username. Full secrets never leave the server.</p>
     </div>
     <form id="tokenForm" class="row-form">
-      <input id="tokenInput" type="password" placeholder="Paste a Bot token (prefix Bot is optional)…" autocomplete="off" />
+      <input id="tokenInput" type="password" placeholder="Paste an account token…" autocomplete="off" />
       <button type="submit" class="btn primary">Add token</button>
+      <button type="button" id="revalidateBtn" class="btn ghost" title="Re-check every token against Discord">Check all</button>
     </form>
     <form id="bulkForm" class="row-form">
-      <input id="bulkInput" type="password" placeholder="Bulk add: paste several tokens, comma or newline separated…" autocomplete="off" />
+      <input id="bulkInput" type="password" placeholder="Bulk add: paste several account tokens, comma or newline separated…" autocomplete="off" />
       <button type="submit" class="btn ghost">Bulk add</button>
     </form>
     <div id="tokenList" class="token-grid"></div>
-    <div class="hint">⚠️ Use <strong>bot tokens</strong> from the <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer">Developer Portal</a>. Automating user accounts (self-bots) violates Discord's ToS and can get accounts banned.</div>
+    <div class="hint">How to get an account token: open Discord in your browser → press <strong>Ctrl+Shift+I</strong> → Application tab → Local Storage → <code>https://discord.com</code> → copy the <code>token</code> value. Never share tokens with anyone — they give full access to the account. ⚠️ Automating user accounts violates Discord's ToS and can get accounts locked or banned; keep intervals generous.</div>
   </section>
 
   <section class="card">

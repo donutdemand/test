@@ -52,9 +52,9 @@ function createApp() {
         };
         state.tokens.push(record);
         added.push(store.publicToken(record));
-        logger.info('tokens', `Token added for ${record.username} (${authType})`);
-        if (authType === 'user') {
-          logger.warn('tokens', 'User token detected — automating user accounts violates Discord ToS and risks a ban. Prefer bot tokens.');
+        logger.info('tokens', `Account token added for ${record.username} (${authType})`);
+        if (authType === 'bot') {
+          logger.info('tokens', 'Bot token detected — works the same way for sending.');
         }
       } catch (err) {
         failed.push({ token: `${String(clean).slice(0, 4)}••••`, error: err.message });
@@ -79,6 +79,33 @@ function createApp() {
     persist();
     logger.info('tokens', `Token removed (${removed.username || removed.id})`);
     res.json({ ok: true });
+  });
+
+  // Re-check every stored account token against Discord (finds locked /
+  // invalid / password-changed accounts without re-pasting anything).
+  app.post('/api/tokens/revalidate', async (req, res) => {
+    const results = [];
+    for (const t of state.tokens) {
+      try {
+        const { me, authType } = await validateToken(t.token);
+        t.username = me.username
+          ? `${me.username}${me.discriminator && me.discriminator !== '0' ? `#${me.discriminator}` : ''}`
+          : t.username;
+        t.userId = me.id || t.userId;
+        t.authType = authType;
+        t.status = 'active';
+        t.lastError = null;
+        results.push({ id: t.id, ok: true, username: t.username });
+      } catch (err) {
+        t.status = 'invalid';
+        t.lastError = err.message;
+        results.push({ id: t.id, ok: false, username: t.username, error: err.message });
+        logger.warn('tokens', `Token for ${t.username} no longer valid: ${err.message}`);
+      }
+    }
+    persist();
+    logger.info('tokens', `Revalidated ${state.tokens.length} token(s): ${results.filter((r) => r.ok).length} active`);
+    res.json({ results, tokens: state.tokens.map(store.publicToken) });
   });
 
   // ---- tasks ----

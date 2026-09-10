@@ -2,9 +2,10 @@ const API_BASE = 'https://discord.com/api/v10';
 const SNOWFLAKE_RE = /^[0-9]{5,25}$/;
 
 /**
- * A Discord "token" is either a bot token (sent as `Bot <token>`)
- * or a user token (sent raw). We auto-detect which one works so the
- * dashboard accepts both, while steering users toward bot tokens.
+ * Account (user) tokens are sent raw as the `Authorization` header,
+ * while bot tokens are sent as `Bot <token>`. We auto-detect which one
+ * works so the dashboard accepts both — account tokens first, since
+ * that is the primary use case here.
  */
 async function tryAuth(token, prefix) {
   const auth = prefix ? `Bot ${token}` : token;
@@ -29,16 +30,14 @@ async function validateToken(token) {
     err.status = 400;
     throw err;
   }
-  // Prefer bot auth first (the supported path).
+  // Account tokens first (primary use case), bot tokens as fallback.
   try {
-    return { ...(await tryAuth(clean, true)), token: clean };
-  } catch (botErr) {
-    // Fall back to raw user-token auth so existing token lists still work.
-    // NOTE: automating user accounts violates Discord's ToS — see README.
+    return { ...(await tryAuth(clean, false)), token: clean };
+  } catch (userErr) {
     try {
-      return { ...(await tryAuth(clean, false)), token: clean };
+      return { ...(await tryAuth(clean, true)), token: clean };
     } catch {
-      throw botErr;
+      throw userErr;
     }
   }
 }
