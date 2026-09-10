@@ -204,7 +204,8 @@ function createApp() {
                 settings: state.settings,
                 sitekey: challenge.sitekey,
                 service: challenge.service,
-                pageUrl: `https://discord.gg/${code}`,
+                pageUrl: 'https://discord.com/channels/@me',
+                rqdata: challenge.rqdata,
                 username: t.username,
               });
             } catch (solveErr) {
