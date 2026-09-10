@@ -1,0 +1,19 @@
+{
+  "name": "discord-multi-token-bot",
+  "version": "1.0.0",
+  "description": "Automated Discord messaging bot with support for multiple tokens, scheduled messages, and a web dashboard.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
