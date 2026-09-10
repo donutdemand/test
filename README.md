@@ -85,7 +85,7 @@ Constraints: `intervalSeconds ≥ MIN_INTERVAL_SECONDS` (default 5), messages �
 
 ## Deploy (Coolify)
 
-See [`COOLIFY.md`](COOLIFY.md) — build from the `Dockerfile` on port `3000`, point your Coolify domain at it, mount `/app/data` so tokens survive redeploys.
+See [`COOLIFY.md`](COOLIFY.md) — build from the `Dockerfile` on port `3000`, point your Coolify domain at it, mount a persistent volume at `/data` so tokens survive redeploys.
 
 ```bash
 docker compose up --build -d  # local Docker equivalent

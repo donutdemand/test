@@ -9,6 +9,10 @@ COPY src ./src
 COPY public ./public
 
 ENV NODE_ENV=production
+# All persistent state (tokens, tasks, settings) lives on the /data volume
+# so redeploys never wipe it. Mount a persistent volume at /data.
+ENV STORE_PATH=/data/store.json
+RUN mkdir -p /data
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
