@@ -13,15 +13,17 @@ the domain you configure — no extra setup in the app required.
 4. **Domain:** in the application → *Domains* tab, add yours
    (e.g. `https://msgs.example.com`). Coolify terminates TLS and proxies to
    the container; nothing to configure in the app.
-5. **Persistent storage:** mount a volume at `/app/data` so `store.json`
-   (tokens, tasks, settings) survives redeploys. Without it, a redeploy
-   wipes your token list.
+5. **Persistent storage (`/data` volume):** in the application →
+   *Storages* tab, add a volume (persistent directory) with mount path
+   `/data`. The app stores everything (`store.json` — tokens, tasks,
+   settings) at `/data/store.json`, so redeploys never wipe it. Without
+   the `/data` volume, a redeploy wipes your token list.
 6. **Environment variables** (all optional):
 
    | Variable | Default | What it does |
    |---|---|---|
    | `PORT` | `3000` | Port the app listens on (Coolify usually injects this) |
-   | `STORE_PATH` | `./data/store.json` | Where tokens/tasks/settings persist |
+   | `STORE_PATH` | `/data/store.json` (in Docker; `./data/store.json` locally) | Where tokens/tasks/settings persist |
    | `MIN_INTERVAL_SECONDS` | `5` | Floor for task intervals (raise to `30`+ on big fleets) |
    | `JOIN_DELAY_SECONDS` | `8` | Pause between accounts during server joins |
    | `DISCORD_TOKENS` | empty | Comma-separated tokens to preload on first boot |
@@ -35,8 +37,9 @@ the domain you configure — no extra setup in the app required.
 - The dashboard's live log uses **Server-Sent Events** (`/api/events`).
   Coolify's default proxy passes these through; if you sit behind an extra
   CDN/proxy, make sure response buffering is off for that path.
-- Redeploys keep `STORE_PATH` only if the `/app/data` volume exists.
-  Back up `store.json` before major changes — it holds your tokens.
+- Redeploys keep everything only if the `/data` volume exists — the app
+  reads/writes `/data/store.json`. Back up `store.json` before major
+  changes — it holds your tokens.
 - Keep the app on its own subdomain; it has no auth gate, so anyone with
   the URL can control your accounts. Protect it (Coolify password / VPN /
   IP allowlist) if it is internet-facing.

@@ -6,7 +6,7 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       - PORT=3000
-      - STORE_PATH=/app/data/store.json
+      - STORE_PATH=/data/store.json
       # Optional: preload account tokens (comma-separated) on first boot.
       # Prefer adding tokens via the dashboard instead.
       - DISCORD_TOKENS=${DISCORD_TOKENS:-}
@@ -15,7 +15,7 @@ services:
       # Optional: default endpoint for the CaptchaAI-compatible solver API.
       - CAPTCHAAI_API_URL=${CAPTCHAAI_API_URL:-}
     volumes:
-      - messenger-data:/app/data
+      - messenger-data:/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 30s
